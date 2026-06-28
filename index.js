@@ -3,33 +3,23 @@ const express = require('express');
 const { Client, GatewayIntentBits, EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle } = require('discord.js');
 const { LavalinkManager } = require('lavalink-client');
 
-// --- Express Server (Giúp Render không sleep) ---
 const app = express();
 const PORT = process.env.PORT || 3000;
 app.get('/', (req, res) => res.send('✅ NodeLink Keeper Bot is running!'));
 app.listen(PORT, () => console.log(`🌐 Web server running on port ${PORT}`));
 
-// --- Hệ thống Ngôn ngữ (Translation System) ---
 const i18n = {
     en: {
         status_title: "🟢 NodeLink Cluster Status",
         not_connected: "❌ Node is not connected.",
-        ping: "Ping",
-        players: "Players",
-        cpu: "CPU Load",
-        ram: "RAM Usage",
-        switch_btn: "🇻🇳 Switch to Vietnamese",
-        footer: "NodeLink Keeper System"
+        ping: "Ping", players: "Players", cpu: "CPU Load", ram: "RAM Usage",
+        switch_btn: "🇻🇳 Switch to Vietnamese", footer: "NodeLink Keeper System"
     },
     vi: {
         status_title: "🟢 Trạng thái Hệ thống NodeLink",
         not_connected: "❌ Node chưa kết nối.",
-        ping: "Độ trễ",
-        players: "Người dùng",
-        cpu: "Tải CPU",
-        ram: "Dung lượng RAM",
-        switch_btn: "🇬🇧 Chuyển sang English",
-        footer: "Hệ thống Giữ sống NodeLink"
+        ping: "Độ trễ", players: "Người dùng", cpu: "Tải CPU", ram: "Dung lượng RAM",
+        switch_btn: "🇬🇧 Chuyển sang English", footer: "Hệ thống Giữ sống NodeLink"
     }
 };
 
@@ -44,28 +34,35 @@ const client = new Client({
     intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildVoiceStates]
 });
 
-// --- KHAI BÁO NODES TÁCH BIỆT (Lách luật kiểm tra gắt gao của lavalink-client v2) ---
+// ✅ FIX: Tách host ra khỏi URL (bỏ "https://" nếu có)
+function parseHost(raw) {
+    return (raw || '').replace(/^https?:\/\//, '').split(':')[0];
+}
+
+// ✅ FIX: dùng host/port/authorization thay vì url/password
 const myNodes = [
     {
-        id: "NodeLink-1", // Dùng id thay vì name
-        url: `${process.env.NODE_HOST || "127.0.0.1"}:${parseInt(process.env.NODE_PORT) || 2333}`,
-        password: process.env.NODE_PASSWORD || "youshallnotpass",
-        secure: process.env.NODE_SECURE === "true" || false
+        id: "NodeLink-1",
+        host: parseHost(process.env.NODE_HOST || "127.0.0.1"),
+        port: parseInt(process.env.NODE_PORT) || 2333,
+        authorization: process.env.NODE_PASSWORD || "youshallnotpass",
+        secure: process.env.NODE_SECURE === "true"
     },
     {
         id: "NodeLink-2",
-        url: `${process.env.NODE2_HOST || "127.0.0.1"}:${parseInt(process.env.NODE2_PORT) || 2333}`,
-        password: process.env.NODE2_PASSWORD || "youshallnotpass",
-        secure: process.env.NODE2_SECURE === "true" || false
+        host: parseHost(process.env.NODE2_HOST || "127.0.0.1"),
+        port: parseInt(process.env.NODE2_PORT) || 2333,
+        authorization: process.env.NODE2_PASSWORD || "youshallnotpass",
+        secure: process.env.NODE2_SECURE === "true"
     }
 ];
 
 console.log("📝 Configured Nodes:", JSON.stringify(myNodes, null, 2));
 
-// --- Cấu hình LavalinkManager ---
+// ✅ FIX: sendToShard → sendPayload
 const lavalinkManager = new LavalinkManager({
-    nodes: myNodes, // Truyền mảng đã định nghĩa sẵn
-    sendToShard: (guildId, payload) => {
+    nodes: myNodes,
+    sendPayload: (guildId, payload) => {
         const guild = client.guilds.cache.get(guildId);
         if (guild) guild.shard.send(payload);
     },
@@ -75,7 +72,6 @@ const lavalinkManager = new LavalinkManager({
     }
 });
 
-// Hàm tạo Embed trạng thái theo ngôn ngữ
 function getStatusEmbed(lang) {
     const t = i18n[lang];
     const embed = new EmbedBuilder()
@@ -87,9 +83,8 @@ function getStatusEmbed(lang) {
     const nodes = Array.from(lavalinkManager.nodeManager.nodes.values());
 
     nodes.forEach((node, index) => {
-        // Lấy tên node, nếu không có name thì lấy id
         const nodeName = `Node ${index + 1} (${node.options.id || node.options.name})`;
-        
+
         if (!node || node.connected !== true) {
             embed.addFields({ name: `🔴 ${nodeName}`, value: `\`\`\`${t.not_connected}\`\`\``, inline: false });
             return;
@@ -99,43 +94,43 @@ function getStatusEmbed(lang) {
         const cpuLoad = stats.cpu?.systemLoad ? (stats.cpu.systemLoad * 100).toFixed(2) : 0;
         const usedRam = stats.memory?.used ? (stats.memory.used / 1024 / 1024).toFixed(2) : 0;
 
-        embed.addFields(
-            { name: `🟢 ${nodeName}`, value: `**${t.ping}:** ${node.ping}ms\n**${t.players}:** ${stats.players || 0}\n**${t.cpu}:** ${cpuLoad}%\n**${t.ram}:** ${usedRam} MB`, inline: true }
-        );
+        embed.addFields({
+            name: `🟢 ${nodeName}`,
+            value: `**${t.ping}:** ${node.ping}ms\n**${t.players}:** ${stats.players || 0}\n**${t.cpu}:** ${cpuLoad}%\n**${t.ram}:** ${usedRam} MB`,
+            inline: true
+        });
     });
 
     return embed;
 }
 
 client.on('ready', async () => {
-    console.log(`✅ Bot ${client.user.tag} is online! / Bot đã online!`);
+    console.log(`✅ Bot ${client.user.tag} is online!`);
     await lavalinkManager.init({ ...client.user });
-    console.log('🎵 Connecting to NodeLink cluster... / Đang kết nối tới hệ thống NodeLink...');
+    console.log('🎵 Connecting to NodeLink cluster...');
 
-    // Vòng lặp giữ sống TẤT CẢ NodeLink
     setInterval(async () => {
         const nodes = Array.from(lavalinkManager.nodeManager.nodes.values());
-        
+
         for (const node of nodes) {
             if (!node || node.connected !== true) continue;
 
             const randomUrl = youtubeUrls[Math.floor(Math.random() * youtubeUrls.length)];
             try {
                 await node.rest.loadTracks(randomUrl);
-                console.log(`✅ [${node.options.id}] Kept alive by loading: ${randomUrl}`);
+                console.log(`✅ [${node.options.id}] Kept alive: ${randomUrl}`);
             } catch (e) {
-                console.error(`❌ [${node.options.id}] Error loading track:`, e.message);
+                console.error(`❌ [${node.options.id}] Error:`, e.message);
             }
         }
-    }, 60000); // 1 phút
+    }, 60000);
 });
 
 client.on('interactionCreate', async (interaction) => {
-    // Xử lý Nút bấm đổi ngôn ngữ
     if (interaction.isButton()) {
         const newLang = interaction.customId === 'lang_en' ? 'en' : 'vi';
         const oppositeLang = newLang === 'en' ? 'vi' : 'en';
-        
+
         const embed = getStatusEmbed(newLang);
         const row = new ActionRowBuilder().addComponents(
             new ButtonBuilder()
@@ -146,13 +141,12 @@ client.on('interactionCreate', async (interaction) => {
         await interaction.update({ embeds: [embed], components: [row] });
     }
 
-    // Xử lý lệnh Slash Command (/status) - Mặc định Tiếng Anh
     if (interaction.isChatInputCommand() && interaction.commandName === 'status') {
-        const embed = getStatusEmbed('en'); // Mặc định English
+        const embed = getStatusEmbed('en');
         const row = new ActionRowBuilder().addComponents(
             new ButtonBuilder()
                 .setCustomId('lang_vi')
-                .setLabel(i18n.vi.switch_btn) // Nút hiện ra bảo "Switch to Vietnamese"
+                .setLabel(i18n.vi.switch_btn)
                 .setStyle(ButtonStyle.Primary)
         );
         await interaction.reply({ embeds: [embed], components: [row] });
@@ -160,12 +154,10 @@ client.on('interactionCreate', async (interaction) => {
 });
 
 client.on('guildCreate', async (guild) => {
-    await guild.commands.set([
-        {
-            name: 'status',
-            description: 'Check NodeLink cluster status / Kiểm tra trạng thái NodeLink'
-        }
-    ]);
+    await guild.commands.set([{
+        name: 'status',
+        description: 'Check NodeLink cluster status / Kiểm tra trạng thái NodeLink'
+    }]);
 });
 
 client.on('raw', (d) => lavalinkManager.sendRawData(d));
