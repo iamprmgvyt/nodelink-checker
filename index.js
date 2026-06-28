@@ -12,14 +12,14 @@ const i18n = {
     en: {
         status_title: "🟢 NodeLink Cluster Status",
         not_connected: "❌ Node is not connected.",
-        ping: "Ping", players: "Players", cpu: "CPU Load", ram: "RAM Usage",
-        switch_btn: "🇻🇳 Switch to Vietnamese", footer: "NodeLink Keeper System"
+        players: "Players", cpu: "CPU Load", ram: "RAM Usage", uptime: "Uptime",
+        footer: "NodeLink Keeper System • Auto-updates every 60s"
     },
     vi: {
         status_title: "🟢 Trạng thái Hệ thống NodeLink",
         not_connected: "❌ Node chưa kết nối.",
-        ping: "Độ trễ", players: "Người dùng", cpu: "Tải CPU", ram: "Dung lượng RAM",
-        switch_btn: "🇬🇧 Chuyển sang English", footer: "Hệ thống Giữ sống NodeLink"
+        players: "Người dùng", cpu: "Tải CPU", ram: "Dung lượng RAM", uptime: "Uptime",
+        footer: "Hệ thống Giữ sống NodeLink • Tự cập nhật mỗi 60s"
     }
 };
 
@@ -34,12 +34,15 @@ const client = new Client({
     intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildVoiceStates]
 });
 
-// ✅ FIX: Tách host ra khỏi URL (bỏ "https://" nếu có)
+const startTime = Date.now();
+
+// Map<messageId, { message, lang }> — lưu các message status để auto-update
+const statusMessages = new Map();
+
 function parseHost(raw) {
     return (raw || '').replace(/^https?:\/\//, '').split(':')[0];
 }
 
-// ✅ FIX: dùng host/port/authorization thay vì url/password
 const myNodes = [
     {
         id: "NodeLink-1",
@@ -59,18 +62,31 @@ const myNodes = [
 
 console.log("📝 Configured Nodes:", JSON.stringify(myNodes, null, 2));
 
-// ✅ FIX: sendToShard → sendPayload
 const lavalinkManager = new LavalinkManager({
     nodes: myNodes,
     sendToShard: (guildId, payload) => {
-    const guild = client.guilds.cache.get(guildId);
-    if (guild) guild.shard.send(payload);
-},
+        const guild = client.guilds.cache.get(guildId);
+        if (guild) guild.shard.send(payload);
+    },
     client: {
         id: process.env.CLIENT_ID,
         username: "NodeLink Keeper"
     }
 });
+
+function formatUptime(ms) {
+    const total = Math.floor(ms / 1000);
+    const d = Math.floor(total / 86400);
+    const h = Math.floor((total % 86400) / 3600);
+    const m = Math.floor((total % 3600) / 60);
+    const s = total % 60;
+    const parts = [];
+    if (d > 0) parts.push(`${d}d`);
+    if (h > 0) parts.push(`${h}h`);
+    if (m > 0) parts.push(`${m}m`);
+    parts.push(`${s}s`);
+    return parts.join(' ');
+}
 
 function getStatusEmbed(lang) {
     const t = i18n[lang];
@@ -80,28 +96,52 @@ function getStatusEmbed(lang) {
         .setFooter({ text: t.footer })
         .setTimestamp();
 
-    const nodes = Array.from(lavalinkManager.nodeManager.nodes.values());
+    // Uptime
+    embed.addFields({
+        name: `⏱️ ${t.uptime}`,
+        value: `\`${formatUptime(Date.now() - startTime)}\``,
+        inline: false
+    });
 
+    const nodes = Array.from(lavalinkManager.nodeManager.nodes.values());
     nodes.forEach((node, index) => {
         const nodeName = `Node ${index + 1} (${node.options.id || node.options.name})`;
 
         if (!node || node.connected !== true) {
-            embed.addFields({ name: `🔴 ${nodeName}`, value: `\`\`\`${t.not_connected}\`\`\``, inline: false });
+            embed.addFields({
+                name: `🔴 ${nodeName}`,
+                value: `\`\`\`${t.not_connected}\`\`\``,
+                inline: false
+            });
             return;
         }
 
         const stats = node.stats || {};
-        const cpuLoad = stats.cpu?.systemLoad ? (stats.cpu.systemLoad * 100).toFixed(2) : 0;
-        const usedRam = stats.memory?.used ? (stats.memory.used / 1024 / 1024).toFixed(2) : 0;
+        const cpuLoad = stats.cpu?.systemLoad ? (stats.cpu.systemLoad * 100).toFixed(2) : '0.00';
+        const usedRam = stats.memory?.used ? (stats.memory.used / 1024 / 1024).toFixed(2) : '0.00';
 
         embed.addFields({
             name: `🟢 ${nodeName}`,
-            value: `**${t.ping}:** ${node.ping}ms\n**${t.players}:** ${stats.players || 0}\n**${t.cpu}:** ${cpuLoad}%\n**${t.ram}:** ${usedRam} MB`,
+            value: `**${t.players}:** ${stats.players || 0}\n**${t.cpu}:** ${cpuLoad}%\n**${t.ram}:** ${usedRam} MB`,
             inline: true
         });
     });
 
     return embed;
+}
+
+// 2 nút cố định, không đổi theo ngôn ngữ
+function getLangRow() {
+    return new ActionRowBuilder().addComponents(
+        new ButtonBuilder()
+            .setCustomId('lang_en')
+            .setLabel('🇬🇧 English')
+            .setStyle(ButtonStyle.Secondary),
+        new ButtonBuilder()
+            .setCustomId('lang_vi')
+            .setLabel('🇻🇳 Tiếng Việt')
+            .setStyle(ButtonStyle.Secondary)
+    );
 }
 
 client.on('ready', async () => {
@@ -110,11 +150,10 @@ client.on('ready', async () => {
     console.log('🎵 Connecting to NodeLink cluster...');
 
     setInterval(async () => {
+        // 1. Keep-alive tất cả nodes
         const nodes = Array.from(lavalinkManager.nodeManager.nodes.values());
-
         for (const node of nodes) {
             if (!node || node.connected !== true) continue;
-
             const randomUrl = youtubeUrls[Math.floor(Math.random() * youtubeUrls.length)];
             try {
                 await node.rest.loadTracks(randomUrl);
@@ -123,33 +162,52 @@ client.on('ready', async () => {
                 console.error(`❌ [${node.options.id}] Error:`, e.message);
             }
         }
+
+        // 2. Auto-update tất cả status messages
+        for (const [msgId, entry] of statusMessages) {
+            try {
+                await entry.message.edit({
+                    embeds: [getStatusEmbed(entry.lang)],
+                    components: [getLangRow()]
+                });
+                console.log(`🔄 Updated status message: ${msgId}`);
+            } catch (e) {
+                // Message bị xóa → clean up
+                console.warn(`⚠️ Removed stale status message: ${msgId}`);
+                statusMessages.delete(msgId);
+            }
+        }
     }, 60000);
 });
 
 client.on('interactionCreate', async (interaction) => {
-    if (interaction.isButton()) {
-        const newLang = interaction.customId === 'lang_en' ? 'en' : 'vi';
-        const oppositeLang = newLang === 'en' ? 'vi' : 'en';
+    // Xử lý nút đổi ngôn ngữ
+    if (interaction.isButton() && ['lang_en', 'lang_vi'].includes(interaction.customId)) {
+        const lang = interaction.customId === 'lang_en' ? 'en' : 'vi';
+        const msgId = interaction.message.id;
 
-        const embed = getStatusEmbed(newLang);
-        const row = new ActionRowBuilder().addComponents(
-            new ButtonBuilder()
-                .setCustomId(`lang_${oppositeLang}`)
-                .setLabel(i18n[oppositeLang].switch_btn)
-                .setStyle(ButtonStyle.Primary)
-        );
-        await interaction.update({ embeds: [embed], components: [row] });
+        // Cập nhật lang lưu trong map để auto-update đúng ngôn ngữ
+        if (statusMessages.has(msgId)) {
+            statusMessages.get(msgId).lang = lang;
+        }
+
+        await interaction.update({
+            embeds: [getStatusEmbed(lang)],
+            components: [getLangRow()]
+        });
+        return;
     }
 
+    // Slash command /status
     if (interaction.isChatInputCommand() && interaction.commandName === 'status') {
-        const embed = getStatusEmbed('en');
-        const row = new ActionRowBuilder().addComponents(
-            new ButtonBuilder()
-                .setCustomId('lang_vi')
-                .setLabel(i18n.vi.switch_btn)
-                .setStyle(ButtonStyle.Primary)
-        );
-        await interaction.reply({ embeds: [embed], components: [row] });
+        const reply = await interaction.reply({
+            embeds: [getStatusEmbed('en')],
+            components: [getLangRow()],
+            fetchReply: true  // cần để lấy message object lưu vào map
+        });
+
+        // Lưu lại để auto-update mỗi 60s
+        statusMessages.set(reply.id, { message: reply, lang: 'en' });
     }
 });
 
