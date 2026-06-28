@@ -44,22 +44,27 @@ const client = new Client({
     intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildVoiceStates]
 });
 
-// --- Cấu hình LavalinkManager (Bản v2 dùng `url` thay vì `host` và `port`) ---
+// --- KHAI BÁO NODES TÁCH BIỆT (Lách luật kiểm tra gắt gao của lavalink-client v2) ---
+const myNodes = [
+    {
+        id: "NodeLink-1", // Dùng id thay vì name
+        url: `${process.env.NODE_HOST || "127.0.0.1"}:${parseInt(process.env.NODE_PORT) || 2333}`,
+        password: process.env.NODE_PASSWORD || "youshallnotpass",
+        secure: process.env.NODE_SECURE === "true" || false
+    },
+    {
+        id: "NodeLink-2",
+        url: `${process.env.NODE2_HOST || "127.0.0.1"}:${parseInt(process.env.NODE2_PORT) || 2333}`,
+        password: process.env.NODE2_PASSWORD || "youshallnotpass",
+        secure: process.env.NODE2_SECURE === "true" || false
+    }
+];
+
+console.log("📝 Configured Nodes:", JSON.stringify(myNodes, null, 2));
+
+// --- Cấu hình LavalinkManager ---
 const lavalinkManager = new LavalinkManager({
-    nodes: [
-        {
-            url: `${process.env.NODE_HOST || "127.0.0.1"}:${parseInt(process.env.NODE_PORT) || 2333}`,
-            password: process.env.NODE_PASSWORD || "youshallnotpass",
-            secure: process.env.NODE_SECURE === "true" || false,
-            name: "NodeLink-1"
-        },
-        {
-            url: `${process.env.NODE2_HOST || "127.0.0.1"}:${parseInt(process.env.NODE2_PORT) || 2333}`,
-            password: process.env.NODE2_PASSWORD || "youshallnotpass",
-            secure: process.env.NODE2_SECURE === "true" || false,
-            name: "NodeLink-2"
-        }
-    ],
+    nodes: myNodes, // Truyền mảng đã định nghĩa sẵn
     sendToShard: (guildId, payload) => {
         const guild = client.guilds.cache.get(guildId);
         if (guild) guild.shard.send(payload);
@@ -70,7 +75,7 @@ const lavalinkManager = new LavalinkManager({
     }
 });
 
-// Hàm tạo Embed trạng thái theo ngôn ngữ (Hiển thị tất cả các Node)
+// Hàm tạo Embed trạng thái theo ngôn ngữ
 function getStatusEmbed(lang) {
     const t = i18n[lang];
     const embed = new EmbedBuilder()
@@ -82,8 +87,8 @@ function getStatusEmbed(lang) {
     const nodes = Array.from(lavalinkManager.nodeManager.nodes.values());
 
     nodes.forEach((node, index) => {
-        // Sử dụng node.options.name cho bản v2
-        const nodeName = `Node ${index + 1} (${node.options.name})`;
+        // Lấy tên node, nếu không có name thì lấy id
+        const nodeName = `Node ${index + 1} (${node.options.id || node.options.name})`;
         
         if (!node || node.connected !== true) {
             embed.addFields({ name: `🔴 ${nodeName}`, value: `\`\`\`${t.not_connected}\`\`\``, inline: false });
@@ -117,9 +122,9 @@ client.on('ready', async () => {
             const randomUrl = youtubeUrls[Math.floor(Math.random() * youtubeUrls.length)];
             try {
                 await node.rest.loadTracks(randomUrl);
-                console.log(`✅ [${node.options.name}] Kept alive by loading: ${randomUrl}`);
+                console.log(`✅ [${node.options.id}] Kept alive by loading: ${randomUrl}`);
             } catch (e) {
-                console.error(`❌ [${node.options.name}] Error loading track:`, e.message);
+                console.error(`❌ [${node.options.id}] Error loading track:`, e.message);
             }
         }
     }, 60000); // 1 phút
