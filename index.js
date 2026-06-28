@@ -62,10 +62,10 @@ console.log("📝 Configured Nodes:", JSON.stringify(myNodes, null, 2));
 // ✅ FIX: sendToShard → sendPayload
 const lavalinkManager = new LavalinkManager({
     nodes: myNodes,
-    sendPayload: (guildId, payload) => {
-        const guild = client.guilds.cache.get(guildId);
-        if (guild) guild.shard.send(payload);
-    },
+    sendToShard: (guildId, payload) => {
+    const guild = client.guilds.cache.get(guildId);
+    if (guild) guild.shard.send(payload);
+},
     client: {
         id: process.env.CLIENT_ID,
         username: "NodeLink Keeper"
