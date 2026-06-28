@@ -44,18 +44,17 @@ const client = new Client({
     intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildVoiceStates]
 });
 
+// --- Cấu hình LavalinkManager (Bản v2 dùng `url` thay vì `host` và `port`) ---
 const lavalinkManager = new LavalinkManager({
     nodes: [
         {
-            host: process.env.NODE_HOST || "127.0.0.1",
-            port: parseInt(process.env.NODE_PORT) || 2333,
+            url: `${process.env.NODE_HOST || "127.0.0.1"}:${parseInt(process.env.NODE_PORT) || 2333}`,
             password: process.env.NODE_PASSWORD || "youshallnotpass",
             secure: process.env.NODE_SECURE === "true" || false,
             name: "NodeLink-1"
         },
         {
-            host: process.env.NODE2_HOST || "127.0.0.1",
-            port: parseInt(process.env.NODE2_PORT) || 2333,
+            url: `${process.env.NODE2_HOST || "127.0.0.1"}:${parseInt(process.env.NODE2_PORT) || 2333}`,
             password: process.env.NODE2_PASSWORD || "youshallnotpass",
             secure: process.env.NODE2_SECURE === "true" || false,
             name: "NodeLink-2"
@@ -83,7 +82,8 @@ function getStatusEmbed(lang) {
     const nodes = Array.from(lavalinkManager.nodeManager.nodes.values());
 
     nodes.forEach((node, index) => {
-        const nodeName = `Node ${index + 1} (${node.name})`;
+        // Sử dụng node.options.name cho bản v2
+        const nodeName = `Node ${index + 1} (${node.options.name})`;
         
         if (!node || node.connected !== true) {
             embed.addFields({ name: `🔴 ${nodeName}`, value: `\`\`\`${t.not_connected}\`\`\``, inline: false });
@@ -117,9 +117,9 @@ client.on('ready', async () => {
             const randomUrl = youtubeUrls[Math.floor(Math.random() * youtubeUrls.length)];
             try {
                 await node.rest.loadTracks(randomUrl);
-                console.log(`✅ [${node.name}] Kept alive by loading: ${randomUrl}`);
+                console.log(`✅ [${node.options.name}] Kept alive by loading: ${randomUrl}`);
             } catch (e) {
-                console.error(`❌ [${node.name}] Error loading track:`, e.message);
+                console.error(`❌ [${node.options.name}] Error loading track:`, e.message);
             }
         }
     }, 60000); // 1 phút
