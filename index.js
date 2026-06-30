@@ -35,32 +35,49 @@ const client = new Client({
 });
 
 const startTime = Date.now();
-
-// Map<messageId, { message, lang }> — lưu các message status để auto-update
 const statusMessages = new Map();
 
 function parseHost(raw) {
     return (raw || '').replace(/^https?:\/\//, '').split(':')[0];
 }
 
-const myNodes = [
-    {
-        id: "NodeLink-1",
-        host: parseHost(process.env.NODE_HOST || "127.0.0.1"),
-        port: parseInt(process.env.NODE_PORT) || 2333,
-        authorization: process.env.NODE_PASSWORD || "youshallnotpass",
-        secure: process.env.NODE_SECURE === "true"
-    },
-    {
-        id: "NodeLink-2",
-        host: parseHost(process.env.NODE2_HOST || "127.0.0.1"),
-        port: parseInt(process.env.NODE2_PORT) || 2333,
-        authorization: process.env.NODE2_PASSWORD || "youshallnotpass",
-        secure: process.env.NODE2_SECURE === "true"
-    }
-];
+// ✅ TỰ ĐỘNG QUÉT NODE THEO ENV — không giới hạn số lượng
+// Quy tắc đặt env: NODE1_HOST, NODE1_PORT, NODE1_PASSWORD, NODE1_SECURE
+//                  NODE2_HOST, NODE2_PORT, ...
+//                  NODE3_HOST, ... cứ thế tăng dần, bao nhiêu node cũng được
+function buildNodesFromEnv() {
+    const nodeIndexes = new Set();
+    const regex = /^NODE(\d+)_HOST$/;
 
-console.log("📝 Configured Nodes:", JSON.stringify(myNodes, null, 2));
+    for (const key of Object.keys(process.env)) {
+        const match = key.match(regex);
+        if (match) nodeIndexes.add(parseInt(match[1]));
+    }
+
+    if (nodeIndexes.size === 0) {
+        console.warn("⚠️ Không tìm thấy biến NODE{n}_HOST nào trong env! Dùng node mặc định 127.0.0.1");
+        return [{
+            id: "NodeLink-1",
+            host: "127.0.0.1",
+            port: 2333,
+            authorization: "youshallnotpass",
+            secure: false
+        }];
+    }
+
+    const sortedIndexes = Array.from(nodeIndexes).sort((a, b) => a - b);
+
+    return sortedIndexes.map(i => ({
+        id: `NodeLink-${i}`,
+        host: parseHost(process.env[`NODE${i}_HOST`]),
+        port: parseInt(process.env[`NODE${i}_PORT`]) || 2333,
+        authorization: process.env[`NODE${i}_PASSWORD`] || "youshallnotpass",
+        secure: process.env[`NODE${i}_SECURE`] === "true"
+    }));
+}
+
+const myNodes = buildNodesFromEnv();
+console.log(`📝 Configured ${myNodes.length} Node(s):`, JSON.stringify(myNodes, null, 2));
 
 const lavalinkManager = new LavalinkManager({
     nodes: myNodes,
@@ -88,6 +105,19 @@ function formatUptime(ms) {
     return parts.join(' ');
 }
 
+// ✅ FIX: NodeLink trả systemLoad dạng load-average thô (có thể >1),
+// không phải tỉ lệ 0-1 như Lavalink gốc → cap lại 0-100% để tránh số ảo kiểu 1357%
+function formatCpuLoad(stats) {
+    const raw = stats.cpu?.systemLoad ?? stats.cpu?.lavalinkLoad ?? 0;
+    let percent = raw * 100;
+
+    // Nếu vượt 100% (do NodeLink báo sai scale) → cap lại nhưng vẫn note rõ
+    if (percent > 100) {
+        return `~100%+ (raw: ${raw.toFixed(2)})`;
+    }
+    return `${percent.toFixed(2)}%`;
+}
+
 function getStatusEmbed(lang) {
     const t = i18n[lang];
     const embed = new EmbedBuilder()
@@ -96,7 +126,6 @@ function getStatusEmbed(lang) {
         .setFooter({ text: t.footer })
         .setTimestamp();
 
-    // Uptime
     embed.addFields({
         name: `⏱️ ${t.uptime}`,
         value: `\`${formatUptime(Date.now() - startTime)}\``,
@@ -117,12 +146,12 @@ function getStatusEmbed(lang) {
         }
 
         const stats = node.stats || {};
-        const cpuLoad = stats.cpu?.systemLoad ? (stats.cpu.systemLoad * 100).toFixed(2) : '0.00';
+        const cpuDisplay = formatCpuLoad(stats);
         const usedRam = stats.memory?.used ? (stats.memory.used / 1024 / 1024).toFixed(2) : '0.00';
 
         embed.addFields({
             name: `🟢 ${nodeName}`,
-            value: `**${t.players}:** ${stats.players || 0}\n**${t.cpu}:** ${cpuLoad}%\n**${t.ram}:** ${usedRam} MB`,
+            value: `**${t.players}:** ${stats.players || 0}\n**${t.cpu}:** ${cpuDisplay}\n**${t.ram}:** ${usedRam} MB`,
             inline: true
         });
     });
@@ -130,7 +159,6 @@ function getStatusEmbed(lang) {
     return embed;
 }
 
-// 2 nút cố định, không đổi theo ngôn ngữ
 function getLangRow() {
     return new ActionRowBuilder().addComponents(
         new ButtonBuilder()
@@ -147,10 +175,9 @@ function getLangRow() {
 client.on('ready', async () => {
     console.log(`✅ Bot ${client.user.tag} is online!`);
     await lavalinkManager.init({ ...client.user });
-    console.log('🎵 Connecting to NodeLink cluster...');
+    console.log(`🎵 Connecting to ${myNodes.length} NodeLink node(s)...`);
 
     setInterval(async () => {
-        // 1. Keep-alive tất cả nodes
         const nodes = Array.from(lavalinkManager.nodeManager.nodes.values());
         for (const node of nodes) {
             if (!node || node.connected !== true) continue;
@@ -163,7 +190,6 @@ client.on('ready', async () => {
             }
         }
 
-        // 2. Auto-update tất cả status messages
         for (const [msgId, entry] of statusMessages) {
             try {
                 await entry.message.edit({
@@ -172,7 +198,6 @@ client.on('ready', async () => {
                 });
                 console.log(`🔄 Updated status message: ${msgId}`);
             } catch (e) {
-                // Message bị xóa → clean up
                 console.warn(`⚠️ Removed stale status message: ${msgId}`);
                 statusMessages.delete(msgId);
             }
@@ -181,12 +206,10 @@ client.on('ready', async () => {
 });
 
 client.on('interactionCreate', async (interaction) => {
-    // Xử lý nút đổi ngôn ngữ
     if (interaction.isButton() && ['lang_en', 'lang_vi'].includes(interaction.customId)) {
         const lang = interaction.customId === 'lang_en' ? 'en' : 'vi';
         const msgId = interaction.message.id;
 
-        // Cập nhật lang lưu trong map để auto-update đúng ngôn ngữ
         if (statusMessages.has(msgId)) {
             statusMessages.get(msgId).lang = lang;
         }
@@ -198,15 +221,13 @@ client.on('interactionCreate', async (interaction) => {
         return;
     }
 
-    // Slash command /status
     if (interaction.isChatInputCommand() && interaction.commandName === 'status') {
         const reply = await interaction.reply({
             embeds: [getStatusEmbed('en')],
             components: [getLangRow()],
-            fetchReply: true  // cần để lấy message object lưu vào map
+            fetchReply: true
         });
 
-        // Lưu lại để auto-update mỗi 60s
         statusMessages.set(reply.id, { message: reply, lang: 'en' });
     }
 });
